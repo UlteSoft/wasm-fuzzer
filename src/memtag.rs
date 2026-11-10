@@ -325,11 +325,13 @@ pub(crate) fn inject(bytes: &[u8], config: &Config, rng: &mut Rng) -> Result<Vec
             let mut result = vec![];
             let mut cursor = body.range().start;
             for (at, snippet) in inserts {
-                result.extend_from_slice(&bytes[cursor..at]);
+                result.extend_from_slice(&bytes[usize::try_from(cursor)?..usize::try_from(at)?]);
                 result.extend(snippet);
                 cursor = at;
             }
-            result.extend_from_slice(&bytes[cursor..body.range().end]);
+            result.extend_from_slice(
+                &bytes[usize::try_from(cursor)?..usize::try_from(body.range().end)?],
+            );
             bodies.push(result);
         }
     }
@@ -404,13 +406,18 @@ pub fn project(bytes: &[u8], features: &crate::Features) -> Result<Vec<u8>> {
     for payload in Parser::new(0).parse_all(bytes) {
         if let Payload::CodeSectionEntry(body) = payload? {
             let mut ops = body.get_operators_reader()?;
-            let mut out = bytes[body.range().start..ops.original_position()].to_vec();
+            let mut out = bytes
+                [usize::try_from(body.range().start)?..usize::try_from(ops.original_position())?]
+                .to_vec();
             while !ops.eof() {
                 let start = ops.original_position();
                 ops.read()?;
                 let end = ops.original_position();
-                if bytes[start] == 0xff {
-                    let mut reader = BinaryReader::new(&bytes[start + 1..end], start + 1);
+                if bytes[usize::try_from(start)?] == 0xff {
+                    let mut reader = BinaryReader::new(
+                        &bytes[usize::try_from(start + 1)?..usize::try_from(end)?],
+                        start + 1,
+                    );
                     let opcode = reader.read_var_u32()?;
                     let memory = reader.read_var_u32()?;
                     let op = descriptor((opcode & 0xffff) as u16).expect("already validated");
@@ -421,7 +428,7 @@ pub fn project(bytes: &[u8], features: &crate::Features) -> Result<Vec<u8>> {
                         constant(memories[memory as usize].memory64, 0, &mut out);
                     }
                 } else {
-                    out.extend_from_slice(&bytes[start..end]);
+                    out.extend_from_slice(&bytes[usize::try_from(start)?..usize::try_from(end)?]);
                 }
             }
             bodies.push(out);

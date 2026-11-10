@@ -27,6 +27,10 @@ fn catalog_covers_every_pinned_core_validator_flag() {
         wasmparser::WasmFeatures::LIME1
     );
     assert_eq!(Features::profile(Profile::Empty).validator().bits(), 0);
+    assert_eq!(
+        Features::default().standard_validator(),
+        wasmparser::WasmFeatures::default() & expected
+    );
 }
 
 #[test]
@@ -68,6 +72,8 @@ fn enabled_extensions_have_real_witnesses_and_disabled_rejections() {
         F::CustomDescriptors,
         F::CompactImports,
         F::FunctionReferences,
+        F::AcquireReleaseAtomics,
+        F::MultibyteArrayAccess,
     ] {
         let mut config = Config {
             features: Features::profile(Profile::WasmMvp),

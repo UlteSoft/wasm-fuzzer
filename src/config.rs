@@ -279,6 +279,9 @@ impl Config {
             sign_extension_ops_enabled: f.contains(F::SignExtension),
             tail_call_enabled: f.contains(F::TailCall),
             threads_enabled: f.contains(F::Threads),
+            acquire_release_atomics_enabled: f.contains(F::AcquireReleaseAtomics),
+            multibyte_array_access_enabled: f.contains(F::MultibyteArrayAccess),
+            compact_imports_enabled: false, // Encoding policy is applied after generation.
             memory64_enabled: f.contains(F::Memory64),
             wide_arithmetic_enabled: f.contains(F::WideArithmetic),
             extended_const_enabled: f.contains(F::ExtendedConst),

@@ -1,13 +1,19 @@
 # Local reader provenance
 
-This is wasmparser 0.249.0 as extended by wasm-git, including its overflow-safe
-reader bounds fix and uwvm packed-wire memtag grammar, feature gate and typed
-operator validation. It is not an unmodified upstream release.
+This is wasmparser 0.263.0 from wasm-tools revision
+`7a2fa422cdf9aeeaf488a2acac8bc94a078bfa32`, extended with the uwvm packed-wire
+memtag grammar, independent feature gate and typed operator validation. It is
+not an unmodified upstream release. The canonical crate SHA-256 is
+`4f5fa0a054ae153606df820eb0a84213e28cda41bbe04ba2628e71b6ba100fcb`.
 
-The source was copied from wasm-git based at commit
-`42e2c5e48ec657853b8d435342e8fdb617101538`. All upstream licensing files remain.
-See [the project provenance record](../../THIRD_PARTY.md) for archive hashes,
-upstream revisions and the independent standard-validator dependency.
+The memtag patch originated in wasm-git at
+`42e2c5e48ec657853b8d435342e8fdb617101538` and was ported to this release.
+The private flag uses bit 63 to avoid upstream component-feature bits. The
+previous local bounds-overflow fix is now supplied by upstream's checked
+reader implementation; no validation rule is relaxed. All upstream license
+files and VCS metadata remain intact.
 
-Memtag globals v2 metadata validation is implemented by the enclosing project;
+Memtag globals v2 metadata validation belongs to the enclosing project;
 this reader alone, like upstream wasmparser, treats custom payloads as opaque.
+
+See [THIRD_PARTY.md](../../THIRD_PARTY.md) for all generator dependencies.

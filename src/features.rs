@@ -6,6 +6,8 @@ use wasmparser_memtag::WasmFeatures as W;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum Profile {
+    #[value(alias = "default")]
+    ValidatorDefault,
     #[value(alias = "none")]
     Empty,
     #[value(alias = "wasmmvp", alias = "mvp")]
@@ -56,10 +58,12 @@ pub enum Feature {
     StackSwitching,
     CustomDescriptors,
     CompactImports,
+    AcquireReleaseAtomics,
+    MultibyteArrayAccess,
 }
 
 impl Feature {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 31] = [
         Self::MutableGlobals,
         Self::SaturatingFloatToInt,
         Self::SignExtension,
@@ -89,6 +93,8 @@ impl Feature {
         Self::StackSwitching,
         Self::CustomDescriptors,
         Self::CompactImports,
+        Self::AcquireReleaseAtomics,
+        Self::MultibyteArrayAccess,
     ];
 
     /// The independent proposals included in the official Core 3 release.
@@ -150,6 +156,8 @@ impl Feature {
             StackSwitching => "stack-switching",
             CustomDescriptors => "custom-descriptors",
             CompactImports => "compact-imports",
+            AcquireReleaseAtomics => "acquire-release-atomics",
+            MultibyteArrayAccess => "multibyte-array-access",
         }
     }
 
@@ -164,6 +172,7 @@ impl Feature {
             LegacyExceptions => &[Exceptions],
             StackSwitching => &[FunctionReferences],
             CustomDescriptors => &[Gc],
+            MultibyteArrayAccess => &[Gc],
             _ => &[],
         }
     }
@@ -200,6 +209,8 @@ impl Feature {
             StackSwitching => W::STACK_SWITCHING,
             CustomDescriptors => W::CUSTOM_DESCRIPTORS,
             CompactImports => W::COMPACT_IMPORTS,
+            AcquireReleaseAtomics => W::ACQUIRE_RELEASE_ATOMICS,
+            MultibyteArrayAccess => W::MULTIBYTE_ARRAY_ACCESS,
         }
     }
 }
@@ -221,7 +232,7 @@ pub struct Features(pub BTreeSet<Feature>);
 
 impl Default for Features {
     fn default() -> Self {
-        Self::profile(Profile::Wasm3)
+        Self::profile(Profile::ValidatorDefault)
     }
 }
 
@@ -229,6 +240,14 @@ impl Features {
     pub fn profile(profile: Profile) -> Self {
         use Feature::*;
         let mut set = Self(BTreeSet::new());
+        if profile == Profile::ValidatorDefault {
+            for f in Feature::ALL {
+                if W::default().contains(f.flag()) {
+                    set.enable(f);
+                }
+            }
+            return set;
+        }
         if profile == Profile::Empty {
             return set;
         }

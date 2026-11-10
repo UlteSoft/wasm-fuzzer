@@ -64,7 +64,9 @@ pub(crate) fn augment(bytes: &[u8], config: &Config, rng: &mut Rng) -> Result<Ve
             }
             Payload::CodeSectionEntry(body) if overlong => {
                 let mut ops = body.get_operators_reader()?;
-                let mut out = bytes[body.range().start..ops.original_position()].to_vec();
+                let mut out = bytes[usize::try_from(body.range().start)?
+                    ..usize::try_from(ops.original_position())?]
+                    .to_vec();
                 while !ops.eof() {
                     let start = ops.original_position();
                     if let Operator::CallIndirect {
@@ -83,7 +85,10 @@ pub(crate) fn augment(bytes: &[u8], config: &Config, rng: &mut Rng) -> Result<Ve
                         }
                         out.extend(leb);
                     } else {
-                        out.extend_from_slice(&bytes[start..ops.original_position()]);
+                        out.extend_from_slice(
+                            &bytes[usize::try_from(start)?
+                                ..usize::try_from(ops.original_position())?],
+                        );
                     }
                 }
                 bodies.push(out);

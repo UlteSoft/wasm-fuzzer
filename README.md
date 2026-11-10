@@ -2,7 +2,7 @@
 
 A Rust generator for **valid, feature-selected WebAssembly Core modules**, from
 the MVP through Core 3.0, every Core feature switch in the pinned wasm-tools
-1.249.0 validator, and the uwvm linear memory-tagging extension. It produces ordinary `.wasm` binaries. The default
+1.263.0 validator, and the uwvm linear memory-tagging extension. It produces ordinary `.wasm` binaries. The default
 configuration has no imports and requires no WASI, JavaScript, or component host.
 
 Every successful generation passes an exact-feature validator before its bytes
@@ -12,7 +12,7 @@ exhaustion is an error, never an empty-module substitution or an invalid output.
 
 ## Build
 
-Rust 1.85 or later is required; the qualification toolchain is Rust 1.93.1.
+Rust 1.88 or later is required; the qualification toolchain is Rust 1.93.1.
 Dependencies are pinned by `Cargo.lock`. Both local vendor patches are documented
 in [THIRD_PARTY.md](THIRD_PARTY.md).
 
@@ -53,8 +53,9 @@ the module and compares every byte, the digest, size, and attempt number.
 Keep the source revision, build target and `Cargo.lock` with a corpus for long-term replay.
 The seed contract is for the same build target; identical seed bytes across
 32-bit and 64-bit generator architectures are not promised.
-Version 0.2 changes the seed-to-bytes mapping; replay deliberately rejects 0.1
-metadata instead of silently claiming compatibility.
+The seed-to-bytes contract includes the exact package version. Version 0.2.1
+updates the upstream generator and rejects earlier replay metadata; retain the
+matching binary when replaying older corpora.
 
 Generation is deterministic, using a specified SplitMix64 entropy expansion.
 Seeds include zero and the full `u64` range. CLI seed ranges reject overflow.
@@ -70,29 +71,31 @@ Seeds include zero and the full `u64` range. CLI seed ranges reject overflow.
 | `wasm3` / `wasm3.0` | Core 2 plus GC, typed function references, tail calls, extended constant expressions, multiple memories, memory64/table64, exceptions and relaxed SIMD |
 | `empty` / `none` | No optional validator flags, including no floats or GC-managed types |
 | `lime1` | The exact upstream `WasmFeatures::LIME1` embedding profile |
-| `all-core` / `all-known` | All 28 pinned Core validator switches, excluding memtag |
+| `validator-default` / `default` | Pinned wasm-tools default Core flags (the implicit preset) |
+| `all-core` / `all-known` | All 30 pinned Core validator switches, excluding memtag |
 | `all` | All Core switches plus memtag |
 
-The default is **Core 3.0**, matching the pinned official reference release.
-It does not inherit wasmparser's broader default proposal set. wasm-git's
+The default matches **wasm-tools 1.263.0's default Core flags**, including threads,
+wide arithmetic and compact imports. Use `--profile wasm3` for strictly Core 3.0.
+Component flags and memtag are excluded from this default. wasm-git's
 recognition boundary is separately **all-known**, regardless of the fuzzer's
 selected compatibility policy.
 
-All 29 switches are independently selectable with repeatable, comma-separated
+All 31 switches are independently selectable with repeatable, comma-separated
 `--enable` and `--disable`. `features` prints their dependency graph:
 
 | Group | Switches |
 | --- | --- |
 | Core 3 proposals | `mutable-globals`, `saturating-float-to-int`, `sign-extension`, `multi-value`, `bulk-memory`, `reference-types`, `simd`, `relaxed-simd`, `tail-call`, `extended-const`, `function-references`, `gc`, `multi-memory`, `memory64`, `exceptions` |
 | Fine-grained Core controls | `floats`, `gc-types`, `bulk-memory-opt`, `call-indirect-overlong` |
-| Additional pinned Core proposals | `threads`, `wide-arithmetic`, `custom-page-sizes`, `legacy-exceptions`, `shared-everything-threads`, `memory-control`, `stack-switching`, `custom-descriptors`, `compact-imports` |
+| Additional pinned Core proposals | `threads`, `wide-arithmetic`, `custom-page-sizes`, `legacy-exceptions`, `shared-everything-threads`, `memory-control`, `stack-switching`, `custom-descriptors`, `compact-imports`, `acquire-release-atomics`, `multibyte-array-access` |
 | Private extension | `memtag` |
 
 Enabling a proposal enables its prerequisites. GC needs function references,
 which need reference types; reference types include `call-indirect-overlong`.
 Bulk memory includes `bulk-memory-opt`; relaxed SIMD needs SIMD. Legacy
 exceptions need exceptions, stack switching needs function references, and
-custom descriptors need GC. Disabling a prerequisite disables its dependents.
+custom descriptors and multibyte array access need GC. Disabling a prerequisite disables its dependents.
 `gc-types` is an orthogonal embedding restriction: it is not silently enabled
 by GC or stack switching; generation suppresses types forbidden by that control.
 
@@ -123,8 +126,8 @@ target/release/wasm-fuzzer matrix --scope all --strength pairwise --plan-only --
 controls from the empty baseline: **92,160** configurations. `all` includes the
 experimental proposals and memtag. Pairwise/triplewise plans cover every feasible
 on/off assignment for every pair/triple in both sparse and dense contexts; the
-29-switch triplewise plan contains **7,348** configurations. It is not exhaustive
-over all 29 switches. Exhaustive plans are capped at 20 dimensions to prevent
+31-switch triplewise plan contains **8,886** configurations. It is not exhaustive
+over all 31 switches. Exhaustive plans are capped at 20 dimensions to prevent
 accidental exponential allocation.
 
 Each plan records its exact features in `matrix.json`; generated subdirectories
@@ -258,10 +261,68 @@ Status is written every 30 seconds; explicit heartbeats occur every 10 minutes.
 Failures stop qualification and retain the input, command output and diagnostics.
 Tool hashes are checked again at completion to prevent mid-run binary changes.
 
+`tools/qualify.py` is the release gate. It runs valid-only generation, random
+hypothetical syntax updates, long history replay and all regressions together.
+The first three campaigns each run **for at least 30 minutes**:
+
+```sh
+tools/run-in-cgroup.sh target/release/wasm-fuzzer generate --profile all --imports \
+  --seed 314159 --count 32 --out-dir upgrade-seeds
+tools/run-in-cgroup.sh python3 ../tools/build-regressions.py \
+  --wasm-git-root ../../wasm-git --output regression-artifacts.json
+tools/run-in-cgroup.sh python3 ../tools/qualify.py official all \
+  --generator target/release/wasm-fuzzer --wasm-tools target/release/wasm-tools \
+  --official reference/wasm --uwvm /absolute/path/to/uwvm2-ros \
+  --uwvm-pure uwvm-validator/validate --wasm-git /absolute/path/to/candidate/wasm-git \
+  --baseline-wasm-git /absolute/path/to/baseline/wasm-git \
+  --syntax-checker ../../wasm-git/tools/check-syntax-upgrade.py \
+  --history-checker ../../wasm-git/tools/check-history-replay.py \
+  --regression-artifacts regression-artifacts.json --wasm-git-root ../../wasm-git \
+  --spec-root reference/spec-943c5df07e84f11d2b83078964df5812530afbd2/test/core \
+  --uwvm-source /absolute/path/to/uwvm2-ros \
+  --mutation-corpus upgrade-seeds --random-cases 2048 --seed 2718281828 \
+  --duration 1800 --heartbeat 600 --workers 8 --output paired-qualification
+```
+
+The syntax campaign cycles through the module version and every Core section
+family, samples nested physical fields, and applies reproducible random edits.
+It also requires all **157 reserved/extension admission-site families** in
+wasm-git's reviewed catalog: section IDs, type constructors, import/export kinds,
+flags, opcode/subopcode namespaces, memory operands, orderings, handlers, custom
+subsections and framing fields. Byte selectors receive all 256 values in seeded
+random order; wider fields receive bit/complement patterns, boundaries and
+random values. Reports verify every required site and distinct selector count.
+See [the syntax evolution contract](https://github.com/UlteSoft/wasm-git/blob/main/documents/SYNTAX_EVOLUTION.eu_US.md)
+for the inventory and the distinction between admission-site coverage and
+unimplemented future semantics. Smoke-only sampling cannot pass the release gate.
+Each update must preserve 100% forward/reverse patch replay, source integrity
+checks, bounded audit spans, and exact raw-byte evidence. Mutants may be future
+syntax or malformed under today's grammar; this separate robustness campaign
+does not weaken the generator's valid-only guarantee. All campaigns must pass,
+and a failure stops the combined gate. Reports include seeds, selected fields,
+replacement bytes, hashes and consumer limitations; intermediates stay in `.tmp`.
+The wasm-git patch compatibility baseline starts at version 0.1.4, so future
+candidates must be checked against the released baseline and subsequent versions.
+
+The combined gate also requires a **2,048-step continuous patch chain**, replayed
+from its root to its tip and completely reversed by both binaries. Every stored
+revision is checked after GC/repacking, cloning, bundle import and independent
+forking. Sixteen forks, a nested fork, divergent branch tips, source removal and
+128-step cherry-pick/revert/rebase queues exercise history and storage behavior.
+An independently encoded expected module checks the two-parent merge result.
+Historical reconstruction continues throughout the timed window.
+
+All compiled Rust regressions run from scratch storage. The 13 opt-in tests are
+mandatory too: the pinned official corpus, real uwvm examples/workflows, extended
+byte fuzz, and the 600-second memtag and language/debug campaigns. A new ignored
+test requires an explicit runner entry; it cannot disappear from acceptance.
+Only the fixed pure preload fixtures in the existing uwvm workflows are executed;
+generated fuzz guests and ROS network modules are not executed.
+
 The official interpreter has no fine-grained feature switches and supports Core
 3, not every experimental proposal. Unsupported profiles are reported separately
 and never counted as official passes. The unmodified wasm-tools CLI checks all
-28 pinned Core switches with `--features=-all,...` and no inherited defaults.
+30 pinned Core switches with `--features=-all,...` and no inherited defaults.
 
 Private memtag instructions are rejected by unmodified wasm-tools. For memtag,
 a typed projection replaces each instruction with input drops and typed zero
@@ -304,7 +365,7 @@ tools/run-in-cgroup.sh bash ../tools/check.sh
 
 # Increase randomized feature combinations without changing the seed schedule.
 WASM_FUZZER_MATRIX_CASES=5000 tools/run-in-cgroup.sh \
-  cargo test --locked --manifest-path ../Cargo.toml --all-targets
+  bash ../tools/check.sh
 ```
 
 Tests cover standard profiles, proposal-by-proposal enablement, deterministic
@@ -313,22 +374,27 @@ fuel, all memtag signatures at both address widths, imported-memory indexing,
 malformed extension encodings, metadata range overlap, CLI errors, and overwrite
 refusal. External three-gate tests use the separate command above.
 
-The initial **0.1.0** qualification passed all 12 integration tests with 5,000 feature
-swarm cases, formatting, Clippy with warnings denied, and a release build on
-Rust 1.93.1. External acceptance passed 640 cases: 384 standard originals and
-256 memtag originals with official typed-projection checks. The corpus covered
-MVP, Core 2, Core 2 + GC, Core 3, MVP/2/3 + memtag, and Core 3 imports with and
-without memtag, including seeds through `u64::MAX`. All 640 passed forward and
-reverse audit and serialized-patch replay with wasm-git. uwvm validated 559
-through its CLI and 81 imported modules through its production validation API.
-The existing cgroup recorded no OOM events. Machine-readable reports and all
-intermediate artifacts remain in ignored `.tmp` storage.
+Version **0.2.1** passed the full combined gate in **2,084.63 seconds** (34 minutes
+45 seconds), with no failures or OOM events. All 42,348 corpus inputs and 21,158
+distinct feature configurations completed exact-feature validation and byte-exact
+forward/reverse replay. A separate exhaustive fine-grained Core enumeration
+produced 184,320 validated modules.
 
-The 0.2.0 paired qualification completed 40,795 cross checks in 1,800.54
-seconds without failure, covering all 39,272 modules in the official exhaustive
-and full triplewise corpora. The separate fine-grained Core enumeration emitted
-184,320 validated modules. See [release notes](RELEASE_NOTES.md) for per-validator
-counts, unsupported profiles, projections and platform smoke results.
+The gate covered all 157 admission-site families (28,800 selector probes), 164
+fixed syntax cases and 2,048 random updates across the module header, every Core
+section and new section IDs: 248,096 exact patch applications. Long histories
+passed 12,288 patch applications and 10,410 historical checkouts, including all
+2,048 chain edges, 16 forks, nested forks and 128-step replay queues. All 1,554
+regular regressions and 13 opt-in tests passed (1,582 test executions including
+16 language workers). Both timed fuzzers completed their full 600 seconds.
+
+The unmodified wasm-tools validator accepted 33,462 originals and 8,886 typed
+memtag projections. The official Core interpreter accepted 26,624 originals
+and 366 projections; 15,358 unsupported profiles were recorded separately.
+uwvm accepted 25,655 originals through its CLI and 1,741 through its production
+pure validation adapter; 14,952 unsupported profiles were recorded separately.
+These projections do not certify private memtag instruction semantics. All
+machine-readable evidence and intermediate artifacts remain in ignored `.tmp`.
 
 ## Binary releases and CI/CD
 

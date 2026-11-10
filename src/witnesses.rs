@@ -120,6 +120,9 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
             }
         }
         if i.control {
+            if f.contains(F::AcquireReleaseAtomics) {
+                wat.push_str("pause\n");
+            }
             wat.push_str("block $done loop $again i32.const 0 br_if $again br $done end end\n");
             wat.push_str("i32.const 1 if nop else nop end\n");
             if f.contains(F::MultiValue) {
@@ -147,7 +150,7 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
                 wat.push_str("global.get $g global.set $g\n");
             }
             if shared_global {
-                wat.push_str("global.atomic.get seq_cst $shared drop\n");
+                wat.push_str("global.atomic.get seqcst $shared drop\n");
             }
         }
         if i.reference && f.contains(F::ReferenceTypes) {
@@ -165,6 +168,12 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
             wat.push_str("i32.const 17 ref.i31 i31.get_s drop\n");
             wat.push_str("i32.const 8 array.new_default $a array.len drop\n");
             wat.push_str("ref.null any ref.test (ref null $s) drop\n");
+            if i.memory && f.contains(F::MultibyteArrayAccess) {
+                wat.push_str(
+                    "i32.const 8 array.new_default $a i32.const 0 i32.load (type $a) drop\n",
+                );
+                wat.push_str("i32.const 8 array.new_default $a i32.const 2 i64.const 17 i64.store (type $a) align=1\n");
+            }
             if descriptors {
                 wat.push_str("struct.new_default $descriptor struct.new_desc $described ref.get_desc $described drop\n");
             }
@@ -191,6 +200,14 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
                     wat.push_str(&format!(
                         "{ty}.const 0 i32.atomic.load $m{n} drop atomic.fence\n"
                     ));
+                    if f.contains(F::AcquireReleaseAtomics) {
+                        wat.push_str(&format!(
+                            "{ty}.const 0 i32.atomic.load $m{n} acqrel drop atomic.fence acqrel\n"
+                        ));
+                        wat.push_str(&format!(
+                            "{ty}.const 0 i32.const 1 i32.atomic.rmw.add $m{n} acqrel drop\n"
+                        ));
+                    }
                 }
                 if passive && n == 0 {
                     wat.push_str(&format!(

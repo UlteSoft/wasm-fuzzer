@@ -96,7 +96,7 @@ pub fn generate(config: &Config, seed: u64) -> Result<Generated> {
     for attempt in 0..config.limits.attempts {
         let mut rng = Rng(seed ^ (attempt as u64).wrapping_mul(0xd6e8feb86659fd93));
         let engine = match config.engine {
-            Engine::Mixed if config.fuel.is_none() && seed % 4 == 0 => Engine::Structured,
+            Engine::Mixed if config.fuel.is_none() && seed.is_multiple_of(4) => Engine::Structured,
             Engine::Mixed => Engine::Smith,
             e => e,
         };

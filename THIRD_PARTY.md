@@ -1,9 +1,9 @@
 # Sources and local patches
 
-## wasm-smith 0.249.0
+## wasm-smith 0.263.0
 
-- Upstream: <https://github.com/bytecodealliance/wasm-tools/tree/efeee7cafa5a3dcdddb5aab27bc0c05f279929ed/crates/wasm-smith>
-- Crate archive SHA-256: `bbd31d0a3861a8eb5c19024a1ee39a7c805151c44074a19a416599ff25b0540a`.
+- Upstream: <https://github.com/bytecodealliance/wasm-tools/tree/7a2fa422cdf9aeeaf488a2acac8bc94a078bfa32/crates/wasm-smith>
+- Crate archive SHA-256: `1102593f74a5b8b496683ea553f55a899a54461a5ad370d1a9eafd32e698a29d`.
 - Vendored in `vendor/wasm-smith`, with original licensing files retained.
 - Local patch: add `Config::allow_global_mixing` and propagate it into the code
   builder. When false, dropping an operand does not implicitly create/export
@@ -18,16 +18,17 @@
 - Release packaging and the WASIp1 std/libc rebuild procedure are adapted from
   Apache-2.0 licensed wasm-git release tooling.
 
-## wasmparser 0.249.0, memtag reader
+## wasmparser 0.263.0, memtag reader
 
-- Upstream: <https://github.com/bytecodealliance/wasm-tools/tree/efeee7cafa5a3dcdddb5aab27bc0c05f279929ed/crates/wasmparser>
-- Original crate SHA-256: `30538cae9a794215f490b532df01c557e2e2bfac92569482554acd0992a102ea`.
+- Upstream: <https://github.com/bytecodealliance/wasm-tools/tree/7a2fa422cdf9aeeaf488a2acac8bc94a078bfa32/crates/wasmparser>
+- Original crate SHA-256: `4f5fa0a054ae153606df820eb0a84213e28cda41bbe04ba2628e71b6ba100fcb`.
 - The local reader was copied from the `wasm-git` working tree based at commit
-  `42e2c5e48ec657853b8d435342e8fdb617101538`, including its memtag changes.
+  `42e2c5e48ec657853b8d435342e8fdb617101538`, including its memtag changes, then ported onto upstream 0.263.0. Bit 63 avoids
+  collision with the new upstream component feature bits.
 - Vendored in `vendor/wasmparser-memtag` and imported with an explicit Cargo
   dependency alias. The unmodified registry wasmparser is a separate dependency.
-- Retained modifications include overflow-safe reader bounds checks, the
-  independent `MEMTAG_EXTENSION` flag, the registered packed-wire instructions,
+- The reader bounds fix is now supplied by upstream. Local modifications are the
+  independent `MEMTAG_EXTENSION` flag at bit 63, the registered packed-wire instructions,
   and memory-index/address-width-aware operand validation. Reserved operations,
   unknown domains/versions and malformed immediates remain errors.
 - This project's globals v2 validator is separate in `src/memtag.rs`; it checks

@@ -103,6 +103,12 @@ macro_rules! define_config {
             /// with exactly the same names and types as those in the provided
             /// WebAssembly module.
             ///
+            /// When `compact_imports_enabled` is enabled, the import section preserves
+            /// the source entries' order and their `Single`, `Compact1`, and `Compact2`
+            /// grouping. Empty compact groups are omitted.
+            /// When `compact_imports_enabled` is disabled,
+            /// compact groups are emitted as ordinary imports.
+            ///
             /// Defaults to `None` which means arbitrary imports and exports will be
             /// generated.
             ///
@@ -218,6 +224,12 @@ macro_rules! define_config {
             /// If provided, the generated module will have imports and exports
             /// with exactly the same names and types as those in the provided
             /// WebAssembly module.
+            ///
+            /// When `compact_imports_enabled` is enabled, the import section preserves
+            /// the source entries' order and their `Single`, `Compact1`, and `Compact2`
+            /// grouping. Empty compact groups are omitted.
+            /// When `compact_imports_enabled` is disabled,
+            /// compact groups are emitted as ordinary imports.
             ///
             /// Defaults to `None` which means arbitrary imports and exports will be
             /// generated.
@@ -436,6 +448,11 @@ define_config! {
 
         /// Permit GC-managed reference types, including externref.
         pub gc_types_enabled: bool = true,
+
+        /// Determines whether compact import section proposal is enabled.
+        ///
+        /// Defaults to `true`.
+        pub compact_imports_enabled: bool = true,
 
         /// Determines whether the custom descriptors proposal is enabled when
         /// generating a Wasm module.
@@ -742,7 +759,23 @@ define_config! {
         /// [wide-arithmetic proposal]: https://github.com/WebAssembly/wide-arithmetic
         ///
         /// Defaults to `false`.
-        pub wide_arithmetic_enabled: bool = false,
+        pub wide_arithmetic_enabled: bool = true,
+
+        /// Determines whether the [acquire-release-atomics proposal] is
+        /// enabled.
+        ///
+        /// [acquire-release-atomics proposal]: https://github.com/WebAssembly/acquire-release-atomics
+        ///
+        /// Defaults to `false`.
+        pub acquire_release_atomics_enabled: bool = false,
+
+        /// Determines whether the [multibyte-array-access proposal] is
+        /// enabled.
+        ///
+        /// [multibyte-array-access proposal]: https://github.com/WebAssembly/multibyte-array-access
+        ///
+        /// Defaults to `false`.
+        pub multibyte_array_access_enabled: bool = false,
 
         /// Determines whether the [extended-const proposal] is enabled.
         ///
@@ -750,6 +783,17 @@ define_config! {
         ///
         /// Defaults to `true`.
         pub extended_const_enabled: bool = true,
+
+        /// Fuel limiting factor used when generating constant expressions.
+        ///
+        /// Defaults to `50`.
+        pub const_expr_fuel: u32 = 50,
+
+        /// Whether or not to limit the size of arrays generated in constant
+        /// expressions.
+        ///
+        /// Defaults to `false`.
+        pub limit_arrays_in_const_exprs: bool = false,
     }
 }
 
@@ -847,6 +891,7 @@ impl<'a> Arbitrary<'a> for Config {
             threads_enabled: u.arbitrary()?,
             tail_call_enabled: u.arbitrary()?,
             gc_enabled: u.arbitrary()?,
+            compact_imports_enabled: u.arbitrary()?,
             memory64_enabled: u.arbitrary()?,
             allowed_instructions: {
                 use flagset::Flags;
@@ -863,6 +908,8 @@ impl<'a> Arbitrary<'a> for Config {
             disallow_traps: u.arbitrary()?,
             allow_floats: u.arbitrary()?,
             extended_const_enabled: u.arbitrary()?,
+            const_expr_fuel: u.int_in_range(0..=100)?,
+            limit_arrays_in_const_exprs: u.arbitrary()?,
 
             // These fields, unlike the ones above, are less useful to set.
             // They either make weird inputs or are for features not widely
@@ -898,6 +945,8 @@ impl<'a> Arbitrary<'a> for Config {
             // Proposals that are not stage4+ are disabled by default.
             custom_page_sizes_enabled: false,
             wide_arithmetic_enabled: false,
+            acquire_release_atomics_enabled: false,
+            multibyte_array_access_enabled: false,
             shared_everything_threads_enabled: false,
             custom_descriptors_enabled: false,
         };
@@ -929,13 +978,16 @@ impl Config {
             self.shared_everything_threads_enabled = false;
         }
 
-        if !self.gc_types_enabled { self.gc_enabled = false; }
+        if !self.gc_types_enabled {
+            self.gc_enabled = false;
+        }
 
         // shared-everything-threads depends on GC, so if gc is disabled then
         // also disable shared-everything-threads.
         if !self.gc_enabled {
             self.shared_everything_threads_enabled = false;
             self.custom_descriptors_enabled = false;
+            self.multibyte_array_access_enabled = false;
         }
 
         // If simd is disabled then disable all relaxed simd instructions as
@@ -948,6 +1000,7 @@ impl Config {
         // without threads, which it is built on.
         if !self.threads_enabled {
             self.shared_everything_threads_enabled = false;
+            self.acquire_release_atomics_enabled = false;
         }
 
         // If module_shape is present then disable available_imports and exports.
@@ -981,7 +1034,10 @@ impl Config {
         features.set(WasmFeatures::REFERENCE_TYPES, self.reference_types_enabled);
         features.set(WasmFeatures::MULTI_VALUE, self.multi_value_enabled);
         features.set(WasmFeatures::BULK_MEMORY, self.bulk_memory_enabled);
-        features.set(WasmFeatures::BULK_MEMORY_OPT, self.bulk_memory_enabled || self.bulk_memory_opt_enabled);
+        features.set(
+            WasmFeatures::BULK_MEMORY_OPT,
+            self.bulk_memory_enabled || self.bulk_memory_opt_enabled,
+        );
         features.set(WasmFeatures::FLOATS, self.allow_floats);
         features.set(WasmFeatures::GC_TYPES, self.gc_types_enabled);
         features.set(WasmFeatures::SIMD, self.simd_enabled);
@@ -990,8 +1046,12 @@ impl Config {
         features.set(WasmFeatures::EXCEPTIONS, self.exceptions_enabled);
         features.set(WasmFeatures::MEMORY64, self.memory64_enabled);
         features.set(WasmFeatures::TAIL_CALL, self.tail_call_enabled);
-        features.set(WasmFeatures::FUNCTION_REFERENCES, self.function_references_enabled || self.gc_enabled);
+        features.set(
+            WasmFeatures::FUNCTION_REFERENCES,
+            self.function_references_enabled || self.gc_enabled,
+        );
         features.set(WasmFeatures::GC, self.gc_enabled);
+        features.set(WasmFeatures::COMPACT_IMPORTS, self.compact_imports_enabled);
         features.set(WasmFeatures::THREADS, self.threads_enabled);
         features.set(
             WasmFeatures::SHARED_EVERYTHING_THREADS,
@@ -1003,6 +1063,14 @@ impl Config {
         );
         features.set(WasmFeatures::EXTENDED_CONST, self.extended_const_enabled);
         features.set(WasmFeatures::WIDE_ARITHMETIC, self.wide_arithmetic_enabled);
+        features.set(
+            WasmFeatures::ACQUIRE_RELEASE_ATOMICS,
+            self.acquire_release_atomics_enabled,
+        );
+        features.set(
+            WasmFeatures::MULTIBYTE_ARRAY_ACCESS,
+            self.multibyte_array_access_enabled,
+        );
         features.set(
             WasmFeatures::CUSTOM_DESCRIPTORS,
             self.custom_descriptors_enabled,

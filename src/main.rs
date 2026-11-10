@@ -21,7 +21,7 @@ struct Cli {
 
 #[derive(Args)]
 struct Selection {
-    /// Base standard. The default is Core 3.0, without experimental extensions.
+    /// Base standard. The default matches the pinned official validator's Core flags.
     #[arg(long, value_enum)]
     profile: Option<Profile>,
     /// Enable proposals and their prerequisites; repeat or separate with commas.

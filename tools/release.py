@@ -51,7 +51,7 @@ def smoke(args):
                 run("replay", path.with_suffix(".json"))
                 assert hashlib.sha256((work / path).read_bytes()).hexdigest() == item["sha256"]
         run("matrix", "--scope", "all", "--strength", "triplewise", "--plan-only", "--out-dir", "matrix")
-        assert len(json.loads((work / "matrix/matrix.json").read_text())["features"]) == 7348
+        assert len(json.loads((work / "matrix/matrix.json").read_text())["features"]) == 8886
     print("PASS release smoke:", args.label)
 
 

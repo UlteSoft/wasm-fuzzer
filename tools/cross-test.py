@@ -24,6 +24,7 @@ EXPERIMENTAL = {
     "threads", "wide-arithmetic", "custom-page-sizes", "legacy-exceptions",
     "shared-everything-threads", "memory-control", "stack-switching",
     "custom-descriptors", "compact-imports",
+    "acquire-release-atomics", "multibyte-array-access",
 }
 UWVM_UNSUPPORTED = EXPERIMENTAL - {"threads"}
 

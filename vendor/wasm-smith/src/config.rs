@@ -381,6 +381,9 @@ define_config! {
         /// Defaults to `true`.
         pub bulk_memory_enabled: bool = true,
 
+        /// Independently permit memory.copy/fill without passive segments.
+        pub bulk_memory_opt_enabled: bool = true,
+
         /// Returns whether NaN values are canonicalized after all f32/f64
         /// operation. Defaults to false.
         ///
@@ -427,6 +430,12 @@ define_config! {
         ///
         /// Defaults to `true`.
         pub gc_enabled: bool = true,
+
+        /// Permit typed function references independently of GC allocations.
+        pub function_references_enabled: bool = true,
+
+        /// Permit GC-managed reference types, including externref.
+        pub gc_types_enabled: bool = true,
 
         /// Determines whether the custom descriptors proposal is enabled when
         /// generating a Wasm module.
@@ -807,6 +816,9 @@ impl<'a> Arbitrary<'a> for Config {
         const MAX_MAXIMUM: usize = 1000;
 
         let mut config = Config {
+            bulk_memory_opt_enabled: u.arbitrary()?,
+            function_references_enabled: u.arbitrary()?,
+            gc_types_enabled: true,
             max_types: u.int_in_range(0..=MAX_MAXIMUM)?,
             max_imports: u.int_in_range(0..=MAX_MAXIMUM)?,
             max_tags: u.int_in_range(0..=MAX_MAXIMUM)?,
@@ -913,8 +925,11 @@ impl Config {
         if !self.reference_types_enabled {
             self.max_tables = self.max_tables.min(1);
             self.gc_enabled = false;
+            self.function_references_enabled = false;
             self.shared_everything_threads_enabled = false;
         }
+
+        if !self.gc_types_enabled { self.gc_enabled = false; }
 
         // shared-everything-threads depends on GC, so if gc is disabled then
         // also disable shared-everything-threads.
@@ -966,13 +981,16 @@ impl Config {
         features.set(WasmFeatures::REFERENCE_TYPES, self.reference_types_enabled);
         features.set(WasmFeatures::MULTI_VALUE, self.multi_value_enabled);
         features.set(WasmFeatures::BULK_MEMORY, self.bulk_memory_enabled);
+        features.set(WasmFeatures::BULK_MEMORY_OPT, self.bulk_memory_enabled || self.bulk_memory_opt_enabled);
+        features.set(WasmFeatures::FLOATS, self.allow_floats);
+        features.set(WasmFeatures::GC_TYPES, self.gc_types_enabled);
         features.set(WasmFeatures::SIMD, self.simd_enabled);
         features.set(WasmFeatures::RELAXED_SIMD, self.relaxed_simd_enabled);
         features.set(WasmFeatures::MULTI_MEMORY, self.max_memories > 1);
         features.set(WasmFeatures::EXCEPTIONS, self.exceptions_enabled);
         features.set(WasmFeatures::MEMORY64, self.memory64_enabled);
         features.set(WasmFeatures::TAIL_CALL, self.tail_call_enabled);
-        features.set(WasmFeatures::FUNCTION_REFERENCES, self.gc_enabled);
+        features.set(WasmFeatures::FUNCTION_REFERENCES, self.function_references_enabled || self.gc_enabled);
         features.set(WasmFeatures::GC, self.gc_enabled);
         features.set(WasmFeatures::THREADS, self.threads_enabled);
         features.set(

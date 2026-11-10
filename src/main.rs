@@ -59,6 +59,25 @@ impl Selection {
 enum Command {
     /// List the complete supported feature/extension inventory.
     Features,
+    /// Generate exhaustive or interaction-complete feature-combination corpora.
+    Matrix {
+        #[arg(long, value_enum, default_value = "official")]
+        scope: wasm_fuzzer::matrix::Scope,
+        #[arg(long, value_enum, default_value = "pairwise")]
+        strength: wasm_fuzzer::matrix::Strength,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        #[arg(long, default_value_t = 2)]
+        count: u64,
+        #[arg(long, value_enum, default_value = "mixed")]
+        engine: Engine,
+        #[arg(long)]
+        imports: bool,
+        #[arg(long)]
+        plan_only: bool,
+        #[arg(long)]
+        out_dir: PathBuf,
+    },
     /// Print the effective configuration, suitable for --config.
     Config {
         #[command(flatten)]
@@ -126,6 +145,38 @@ fn create(path: &Path, bytes: &[u8]) -> Result<()> {
     file.write_all(bytes)?;
     Ok(())
 }
+fn corpus(config: &Config, seed: u64, count: u64, out_dir: &Path) -> Result<()> {
+    ensure!(count > 0 && count <= 1_000_000, "count must be 1..=1000000");
+    ensure!(
+        seed.checked_add(count - 1).is_some(),
+        "seed range overflows u64"
+    );
+    config.check()?;
+    fs::create_dir(out_dir).context("out-dir must be new and its parent must exist")?;
+    create(
+        &out_dir.join("config.json"),
+        &serde_json::to_vec_pretty(config)?,
+    )?;
+    let mut manifest = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(out_dir.join("manifest.jsonl"))?;
+    for n in 0..count {
+        let generated = generate(config, seed + n)?;
+        let base = format!("{:016x}", seed + n);
+        create(&out_dir.join(format!("{base}.wasm")), &generated.bytes)?;
+        create(
+            &out_dir.join(format!("{base}.json")),
+            &serde_json::to_vec_pretty(&generated.metadata)?,
+        )?;
+        writeln!(
+            manifest,
+            "{}",
+            serde_json::json!({"seed":seed+n,"file":format!("{base}.wasm"),"sha256":generated.metadata.sha256,"attempt":generated.metadata.attempt,"engine":generated.metadata.engine})
+        )?;
+    }
+    Ok(())
+}
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Features => {
@@ -142,6 +193,58 @@ fn main() -> Result<()> {
                 );
             }
             println!("memory64 includes table64; memtag uses FF packed v1/linear1 and globals v2");
+        }
+        Command::Matrix {
+            scope,
+            strength,
+            seed,
+            count,
+            engine,
+            imports,
+            plan_only,
+            out_dir,
+        } => {
+            use wasm_fuzzer::matrix;
+            let plan = matrix::plan(scope, strength)?;
+            ensure!(
+                count > 0 && seed.checked_add(count - 1).is_some(),
+                "invalid seed range"
+            );
+            fs::create_dir(&out_dir).context("matrix out-dir must be new")?;
+            create(
+                &out_dir.join("matrix.json"),
+                &serde_json::to_vec_pretty(&serde_json::json!({
+                    "format": 1, "generator_version": env!("CARGO_PKG_VERSION"), "scope":scope,
+                    "strength":strength, "dimensions":scope.dimensions(), "configurations":plan.len(),
+                    "seed":seed, "count":count, "engine":engine, "plan_only":plan_only,
+                    "corpora":plan.iter().map(|f| format!("{:08x}", matrix::mask(f))).collect::<Vec<_>>(),
+                    "features":plan,
+                }))?,
+            )?;
+            if !plan_only {
+                for (n, features) in plan.iter().enumerate() {
+                    let mut config = Config {
+                        features: features.clone(),
+                        engine,
+                        ..Config::default()
+                    };
+                    config.sections.imports = imports;
+                    corpus(
+                        &config,
+                        seed,
+                        count,
+                        &out_dir.join(format!("{:08x}", matrix::mask(features))),
+                    )?;
+                    if (n + 1) % 256 == 0 {
+                        eprintln!("validated {} / {} configurations", n + 1, plan.len());
+                    }
+                }
+            }
+            println!(
+                "{} feature configurations: {}",
+                plan.len(),
+                out_dir.display()
+            );
         }
         Command::Config { selection } => {
             println!("{}", serde_json::to_string_pretty(&selection.config()?)?)
@@ -170,30 +273,7 @@ fn main() -> Result<()> {
             if no_start {
                 config.sections.start = false;
             }
-            config.check()?;
-            fs::create_dir(&out_dir).context("out-dir must be new and its parent must exist")?;
-            create(
-                &out_dir.join("config.json"),
-                &serde_json::to_vec_pretty(&config)?,
-            )?;
-            let mut manifest = fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(out_dir.join("manifest.jsonl"))?;
-            for n in 0..count {
-                let generated = generate(&config, seed + n)?;
-                let base = format!("{:016x}", seed + n);
-                create(&out_dir.join(format!("{base}.wasm")), &generated.bytes)?;
-                create(
-                    &out_dir.join(format!("{base}.json")),
-                    &serde_json::to_vec_pretty(&generated.metadata)?,
-                )?;
-                writeln!(
-                    manifest,
-                    "{}",
-                    serde_json::json!({"seed":seed+n,"file":format!("{base}.wasm"),"sha256":generated.metadata.sha256,"attempt":generated.metadata.attempt,"engine":generated.metadata.engine})
-                )?;
-            }
+            corpus(&config, seed, count, &out_dir)?;
             println!(
                 "generated and validated {count} modules in {}",
                 out_dir.display()

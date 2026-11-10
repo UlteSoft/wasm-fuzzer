@@ -2083,7 +2083,7 @@ fn call(
 
 #[inline]
 fn call_ref_valid(module: &Module, builder: &mut CodeBuilder) -> bool {
-    if !module.config.gc_enabled {
+    if !module.config.function_references_enabled && !module.config.gc_enabled {
         return false;
     }
     let funcref = match builder.concrete_funcref_on_stack(module) {
@@ -2238,7 +2238,7 @@ fn return_call(
 
 #[inline]
 fn return_call_ref_valid(module: &Module, builder: &mut CodeBuilder) -> bool {
-    if !module.config.gc_enabled {
+    if !module.config.function_references_enabled && !module.config.gc_enabled {
         return false;
     }
 
@@ -2372,7 +2372,7 @@ fn throw_ref(
 
 #[inline]
 fn br_on_null_valid(module: &Module, builder: &mut CodeBuilder) -> bool {
-    if !module.config.gc_enabled {
+    if !module.config.function_references_enabled && !module.config.gc_enabled {
         return false;
     }
     if builder.ref_type_on_stack().is_none() {
@@ -2461,7 +2461,7 @@ fn is_valid_br_on_non_null_control(
 
 #[inline]
 fn br_on_non_null_valid(module: &Module, builder: &mut CodeBuilder) -> bool {
-    module.config.gc_enabled
+    (module.config.gc_enabled || module.config.function_references_enabled)
         && builder
             .allocs
             .controls
@@ -3446,7 +3446,7 @@ fn memory_init(
 
 #[inline]
 fn memory_fill_valid(module: &Module, builder: &mut CodeBuilder) -> bool {
-    module.config.bulk_memory_enabled
+    (module.config.bulk_memory_enabled || module.config.bulk_memory_opt_enabled)
         && !module.config.disallow_traps // Non-trapping memory fill generation not yet implemented
         && (builder.allocs.memory32.len() > 0
             && builder.types_on_stack(module, &[ValType::I32, ValType::I32, ValType::I32])
@@ -3473,7 +3473,7 @@ fn memory_fill(
 
 #[inline]
 fn memory_copy_valid(module: &Module, builder: &mut CodeBuilder) -> bool {
-    if !module.config.bulk_memory_enabled {
+    if !module.config.bulk_memory_enabled && !module.config.bulk_memory_opt_enabled {
         return false;
     }
 
@@ -5468,7 +5468,8 @@ fn ref_null(
     builder: &mut CodeBuilder,
     instructions: &mut Vec<Instruction>,
 ) -> Result<()> {
-    let mut choices = vec![RefType::EXTERNREF, RefType::FUNCREF];
+    let mut choices = vec![RefType::FUNCREF];
+    if module.config.gc_types_enabled { choices.push(RefType::EXTERNREF); }
     if module.config.exceptions_enabled {
         choices.push(RefType::EXNREF);
     }
@@ -5488,6 +5489,8 @@ fn ref_null(
             );
         }
 
+    }
+    if module.config.gc_enabled || module.config.function_references_enabled {
         for i in 0..module.types.len() {
             let i = u32::try_from(i).unwrap();
             choices.push(RefType {
@@ -5515,7 +5518,7 @@ fn ref_func(
 ) -> Result<()> {
     let i = *u.choose(&builder.allocs.referenced_functions)?;
     let ty = module.funcs[usize::try_from(i).unwrap()].0;
-    builder.push_operand(Some(ValType::Ref(if module.config.gc_enabled {
+    builder.push_operand(Some(ValType::Ref(if module.config.gc_enabled || module.config.function_references_enabled {
         RefType {
             nullable: false,
             heap_type: HeapType::Concrete(ty),
@@ -5529,7 +5532,7 @@ fn ref_func(
 
 #[inline]
 fn ref_as_non_null_valid(module: &Module, builder: &mut CodeBuilder) -> bool {
-    module.config.gc_enabled && builder.ref_type_on_stack().is_some()
+    (module.config.gc_enabled || module.config.function_references_enabled) && builder.ref_type_on_stack().is_some()
 }
 
 fn ref_as_non_null(

@@ -39,6 +39,7 @@ pub fn sha256(bytes: &[u8]) -> String {
 }
 
 fn finish(config: &Config, bytes: Vec<u8>, rng: &mut Rng) -> Result<Vec<u8>> {
+    let bytes = crate::encoding::augment(&bytes, config, rng)?;
     // Validate the base as well: augmentation must not conceal generator failures.
     validate(&bytes, &config.features).context("base module validation")?;
     let bytes = if config.features.contains(Feature::Memtag) {

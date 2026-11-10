@@ -1,6 +1,6 @@
 [package]
 name = "wasm-fuzzer"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Reproducible, feature-exact valid WebAssembly Core and uwvm memtag generation"
@@ -15,7 +15,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 wasm-smith = { path = "vendor/wasm-smith" }
-wasm-encoder = "=0.249.0"
+wasm-encoder = { version = "=0.249.0", features = ["wasmparser"] }
 wasmparser = "=0.249.0"
 wasmparser-memtag = { package = "wasmparser", path = "vendor/wasmparser-memtag" }
 wat = "=1.249.0"

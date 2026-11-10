@@ -1,0 +1,48 @@
+name: Publish release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  qualification:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      statuses: read
+    steps:
+      - name: Require the exact commit's local 30-minute qualification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/status" --jq '[.statuses[] | select(.context == "qualification/cgroup-64gib")][0].state')
+          test "$state" = success
+  verify:
+    needs: qualification
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: .tmp/dist
+      - name: Verify version and archive inventory
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python -c 'import os,tomllib; v=tomllib.load(open("Cargo.toml","rb"))["package"]["version"]; assert os.environ["RELEASE_TAG"] == "v"+v'
+          python tools/release.py checksums
+      - name: Publish all ten platforms
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" .tmp/dist/* --verify-tag --prerelease --title "wasm-fuzzer $RELEASE_TAG" --notes-file RELEASE_NOTES.md

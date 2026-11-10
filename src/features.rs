@@ -6,6 +6,8 @@ use wasmparser_memtag::WasmFeatures as W;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum Profile {
+    #[value(alias = "none")]
+    Empty,
     #[value(alias = "wasmmvp", alias = "mvp")]
     WasmMvp,
     #[value(alias = "wasm1.0", alias = "1.0")]
@@ -14,6 +16,9 @@ pub enum Profile {
     Wasm2,
     #[value(alias = "wasm3.0", alias = "3.0")]
     Wasm3,
+    Lime1,
+    #[value(alias = "all-known")]
+    AllCore,
     All,
 }
 
@@ -41,10 +46,20 @@ pub enum Feature {
     WideArithmetic,
     CustomPageSizes,
     Memtag,
+    Floats,
+    GcTypes,
+    BulkMemoryOpt,
+    CallIndirectOverlong,
+    LegacyExceptions,
+    SharedEverythingThreads,
+    MemoryControl,
+    StackSwitching,
+    CustomDescriptors,
+    CompactImports,
 }
 
 impl Feature {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 29] = [
         Self::MutableGlobals,
         Self::SaturatingFloatToInt,
         Self::SignExtension,
@@ -64,7 +79,44 @@ impl Feature {
         Self::WideArithmetic,
         Self::CustomPageSizes,
         Self::Memtag,
+        Self::Floats,
+        Self::GcTypes,
+        Self::BulkMemoryOpt,
+        Self::CallIndirectOverlong,
+        Self::LegacyExceptions,
+        Self::SharedEverythingThreads,
+        Self::MemoryControl,
+        Self::StackSwitching,
+        Self::CustomDescriptors,
+        Self::CompactImports,
     ];
+
+    /// The independent proposals included in the official Core 3 release.
+    pub const OFFICIAL_PROPOSALS: [Self; 15] = [
+        Self::MutableGlobals,
+        Self::SaturatingFloatToInt,
+        Self::SignExtension,
+        Self::MultiValue,
+        Self::BulkMemory,
+        Self::ReferenceTypes,
+        Self::Simd,
+        Self::RelaxedSimd,
+        Self::TailCall,
+        Self::ExtendedConst,
+        Self::FunctionReferences,
+        Self::Gc,
+        Self::MultiMemory,
+        Self::Memory64,
+        Self::Exceptions,
+    ];
+
+    pub fn official(self) -> bool {
+        Self::OFFICIAL_PROPOSALS.contains(&self)
+            || matches!(
+                self,
+                Self::Floats | Self::GcTypes | Self::BulkMemoryOpt | Self::CallIndirectOverlong
+            )
+    }
 
     pub fn name(self) -> &'static str {
         use Feature::*;
@@ -88,15 +140,30 @@ impl Feature {
             WideArithmetic => "wide-arithmetic",
             CustomPageSizes => "custom-page-sizes",
             Memtag => "memtag",
+            Floats => "floats",
+            GcTypes => "gc-types",
+            BulkMemoryOpt => "bulk-memory-opt",
+            CallIndirectOverlong => "call-indirect-overlong",
+            LegacyExceptions => "legacy-exceptions",
+            SharedEverythingThreads => "shared-everything-threads",
+            MemoryControl => "memory-control",
+            StackSwitching => "stack-switching",
+            CustomDescriptors => "custom-descriptors",
+            CompactImports => "compact-imports",
         }
     }
 
     pub fn dependencies(self) -> &'static [Self] {
         use Feature::*;
         match self {
+            BulkMemory => &[BulkMemoryOpt],
+            ReferenceTypes => &[CallIndirectOverlong],
             RelaxedSimd => &[Simd],
             FunctionReferences => &[ReferenceTypes],
-            Gc => &[FunctionReferences, ReferenceTypes],
+            Gc => &[FunctionReferences],
+            LegacyExceptions => &[Exceptions],
+            StackSwitching => &[FunctionReferences],
+            CustomDescriptors => &[Gc],
             _ => &[],
         }
     }
@@ -123,6 +190,16 @@ impl Feature {
             WideArithmetic => W::WIDE_ARITHMETIC,
             CustomPageSizes => W::CUSTOM_PAGE_SIZES,
             Memtag => W::MEMTAG_EXTENSION,
+            Floats => W::FLOATS,
+            GcTypes => W::GC_TYPES,
+            BulkMemoryOpt => W::BULK_MEMORY_OPT,
+            CallIndirectOverlong => W::CALL_INDIRECT_OVERLONG,
+            LegacyExceptions => W::LEGACY_EXCEPTIONS,
+            SharedEverythingThreads => W::SHARED_EVERYTHING_THREADS,
+            MemoryControl => W::MEMORY_CONTROL,
+            StackSwitching => W::STACK_SWITCHING,
+            CustomDescriptors => W::CUSTOM_DESCRIPTORS,
+            CompactImports => W::COMPACT_IMPORTS,
         }
     }
 }
@@ -152,11 +229,29 @@ impl Features {
     pub fn profile(profile: Profile) -> Self {
         use Feature::*;
         let mut set = Self(BTreeSet::new());
+        if profile == Profile::Empty {
+            return set;
+        }
+        set.enable(Floats);
+        set.enable(GcTypes);
         if profile == Profile::WasmMvp {
             return set;
         }
         set.enable(MutableGlobals);
         if profile == Profile::Wasm1 {
+            return set;
+        }
+        if profile == Profile::Lime1 {
+            for f in [
+                MultiValue,
+                SignExtension,
+                SaturatingFloatToInt,
+                BulkMemoryOpt,
+                ExtendedConst,
+                CallIndirectOverlong,
+            ] {
+                set.enable(f);
+            }
             return set;
         }
         for f in [
@@ -186,9 +281,11 @@ impl Features {
         }
         // Threads, wide arithmetic, custom pages and memtag are independent
         // proposals, not silently included in the official Core 3 preset.
-        if profile == Profile::All {
+        if matches!(profile, Profile::All | Profile::AllCore) {
             for f in Feature::ALL {
-                set.enable(f);
+                if f != Memtag || profile == Profile::All {
+                    set.enable(f);
+                }
             }
         }
         set
@@ -222,7 +319,7 @@ impl Features {
         Ok(())
     }
     pub fn validator(&self) -> W {
-        self.0.iter().fold(W::MVP, |flags, f| flags | f.flag())
+        self.0.iter().fold(W::empty(), |flags, f| flags | f.flag())
     }
     pub fn standard_validator(&self) -> wasmparser::WasmFeatures {
         wasmparser::WasmFeatures::from_bits_truncate(self.validator().bits())

@@ -1,0 +1,144 @@
+name: Release builds
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/.tmp/target
+  TMPDIR: ${{ github.workspace }}/.tmp/temp
+  TEMP: ${{ github.workspace }}/.tmp/temp
+  TMP: ${{ github.workspace }}/.tmp/temp
+  XDG_CACHE_HOME: ${{ github.workspace }}/.tmp/cache
+  PYTHONDONTWRITEBYTECODE: '1'
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
+jobs:
+  native:
+    name: Native ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            suffix: .exe
+            rustflags: '-D warnings -C target-feature=+crt-static'
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            suffix: .exe
+            rustflags: '-D warnings -C target-feature=+crt-static'
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            suffix: ''
+            rustflags: '-D warnings'
+          - os: macos-15
+            target: aarch64-apple-darwin
+            suffix: ''
+            rustflags: '-D warnings'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create scratch directories
+        shell: bash
+        run: mkdir -p .tmp/temp .tmp/cache .tmp/target
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.93.1
+          cache-workspaces: . -> .tmp/target
+          cache-key: ${{ matrix.target }}
+          target: ${{ matrix.target }}
+      - name: Build generator
+        run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Package only release inputs
+        run: python tools/release.py package --label ${{ matrix.target }} --client .tmp/target/${{ matrix.target }}/release/wasm-fuzzer${{ matrix.suffix }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: .tmp/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Linux ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            qemu: qemu-x86_64
+          - target: aarch64-unknown-linux-musl
+            qemu: qemu-aarch64
+          - target: armv7-unknown-linux-musleabihf
+            qemu: qemu-arm
+          - target: riscv64gc-unknown-linux-musl
+            qemu: qemu-riscv64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.tmp/zig-cache
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p .tmp/temp .tmp/cache .tmp/target
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.93.1
+          cache-workspaces: . -> .tmp/target
+          cache-key: ${{ matrix.target }}
+          target: ${{ matrix.target }}
+      - name: Cross compiler
+        run: |
+          python -m venv .tmp/cross-tools
+          .tmp/cross-tools/bin/pip install ziglang==0.15.2 cargo-zigbuild==0.24.1
+          echo "$PWD/.tmp/cross-tools/bin" >> "$GITHUB_PATH"
+      - run: cargo zigbuild --locked --release --target ${{ matrix.target }}
+      - run: python tools/release.py package --label ${{ matrix.target }} --client .tmp/target/${{ matrix.target }}/release/wasm-fuzzer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: .tmp/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  wasi:
+    name: WASIp1 ${{ matrix.profile }}
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [mvp, core2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p .tmp/temp .tmp/cache .tmp/target
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.93.1
+          cache-workspaces: . -> .tmp/wasi/target-${{ matrix.profile }}
+          cache-key: wasi-${{ matrix.profile }}
+          target: wasm32-wasip1
+          components: rust-src
+      - name: Rebuild libc and std, package (qualification is local)
+        run: python tools/build-wasi.py --profile ${{ matrix.profile }} --build-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-wasm32-wasip1-${{ matrix.profile }}
+          path: .tmp/dist/*
+          if-no-files-found: error
+          retention-days: 7

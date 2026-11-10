@@ -1145,7 +1145,7 @@ impl Module {
             MaxTypeLimit::ModuleTypes => u32::try_from(self.types.len()).unwrap(),
         };
 
-        if self.config.gc_enabled && concrete_type_limit > 0 && u.arbitrary()? {
+        if (self.config.gc_enabled || self.config.function_references_enabled) && concrete_type_limit > 0 && u.arbitrary()? {
             let idx = u.int_in_range(0..=concrete_type_limit - 1)?;
             // If the caller is demanding a shared heap type but the concrete
             // type we found is not in fact shared, we skip down below to use an
@@ -1162,7 +1162,8 @@ impl Module {
         }
 
         use AbstractHeapType::*;
-        let mut choices = vec![Func, Extern];
+        let mut choices = vec![Func];
+        if self.config.gc_types_enabled { choices.push(Extern); }
         if self.config.exceptions_enabled {
             choices.push(Exn);
         }
@@ -1981,7 +1982,7 @@ impl Module {
         u: &mut Unstructured,
         ty: RefType,
     ) -> Result<Option<ConstExpr>> {
-        if !self.config.gc_enabled {
+        if !self.config.function_references_enabled && !self.config.gc_enabled {
             assert!(ty.nullable);
             return Ok(None);
         }
@@ -3092,7 +3093,7 @@ pub(crate) fn configured_valtypes(config: &Config) -> Vec<ValType> {
             }
         }
     } else if config.reference_types_enabled {
-        valtypes.push(ValType::EXTERNREF);
+        if config.gc_types_enabled { valtypes.push(ValType::EXTERNREF); }
         valtypes.push(ValType::FUNCREF);
     }
     valtypes

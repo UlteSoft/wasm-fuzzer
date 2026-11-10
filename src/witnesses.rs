@@ -13,7 +13,10 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
     let funcs = s.types && s.functions && l.types > 0 && l.functions > 0;
     let imported = funcs && s.imports && l.imports > 0 && l.functions >= 2;
     let leaf = funcs && l.functions - usize::from(imported) >= 2;
-    let gc = s.types && l.types >= 3 && f.contains(F::Gc);
+    let gc = s.types && l.types >= 3 && f.contains(F::Gc) && f.contains(F::GcTypes);
+    let continuation =
+        funcs && l.types >= 4 && f.contains(F::StackSwitching) && f.contains(F::GcTypes);
+    let descriptors = gc && l.types >= 6 && f.contains(F::CustomDescriptors);
     let count = if !s.memories {
         0
     } else {
@@ -47,6 +50,12 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
         wat.push_str(
             "(rec (type $s (sub (struct (field (mut i32)))))) (type $a (array (mut i16)))\n",
         );
+    }
+    if continuation {
+        wat.push_str("(type $c (cont $v))\n");
+    }
+    if descriptors {
+        wat.push_str("(rec (type $described (descriptor $descriptor) (struct)) (type $descriptor (describes $described) (struct)))\n");
     }
     if imported {
         wat.push_str("(import \"fuzz\" \"function\" (func $imported (type $v)))\n");
@@ -83,6 +92,10 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
         };
         wat.push_str(&format!("(global $g (mut i32) {init})\n"));
     }
+    let shared_global = global && l.globals > 1 && f.contains(F::SharedEverythingThreads);
+    if shared_global {
+        wat.push_str("(global $shared (shared mut i32) (i32.const 0))\n");
+    }
     if leaf {
         wat.push_str("(func $leaf (type $v) nop)\n");
     }
@@ -99,7 +112,7 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
             if f.contains(F::SignExtension) {
                 wat.push_str("i32.const 255 i32.extend8_s drop\n");
             }
-            if f.contains(F::SaturatingFloatToInt) {
+            if f.contains(F::SaturatingFloatToInt) && f.contains(F::Floats) {
                 wat.push_str("f64.const nan i64.trunc_sat_f64_u drop\n");
             }
             if f.contains(F::WideArithmetic) {
@@ -117,6 +130,15 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
             }
             if tag {
                 wat.push_str("block $caught try_table (catch $e $caught) throw $e end end\n");
+                if f.contains(F::LegacyExceptions) {
+                    wat.push_str("try throw $e catch $e nop catch_all nop end\n");
+                }
+            }
+            if continuation {
+                wat.push_str("ref.null $v cont.new $c cont.bind $c $c resume $c\n");
+                if tag {
+                    wat.push_str("suspend $e\n");
+                }
             }
         }
         if i.variable {
@@ -124,9 +146,16 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
             if global {
                 wat.push_str("global.get $g global.set $g\n");
             }
+            if shared_global {
+                wat.push_str("global.atomic.get seq_cst $shared drop\n");
+            }
         }
         if i.reference && f.contains(F::ReferenceTypes) {
-            wat.push_str("ref.null extern ref.is_null drop\n");
+            wat.push_str(if f.contains(F::GcTypes) {
+                "ref.null extern ref.is_null drop\n"
+            } else {
+                "ref.null func ref.is_null drop\n"
+            });
         }
         if i.control && i.reference && f.contains(F::FunctionReferences) && (declared || elem) {
             wat.push_str("ref.func $leaf call_ref $v\n");
@@ -136,6 +165,9 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
             wat.push_str("i32.const 17 ref.i31 i31.get_s drop\n");
             wat.push_str("i32.const 8 array.new_default $a array.len drop\n");
             wat.push_str("ref.null any ref.test (ref null $s) drop\n");
+            if descriptors {
+                wat.push_str("struct.new_default $descriptor struct.new_desc $described ref.get_desc $described drop\n");
+            }
         }
         if i.vector && f.contains(F::Simd) {
             wat.push_str("v128.const i32x4 1 2 3 4 i32x4.abs drop\n");
@@ -147,10 +179,13 @@ pub(crate) fn module(config: &Config, rng: &mut Rng) -> Result<Vec<u8>> {
             let ty = if *is64 { "i64" } else { "i32" };
             if i.memory {
                 wat.push_str(&format!("{ty}.const 0 i32.const {} i32.store $m{n}\n{ty}.const 0 i32.load $m{n} drop\nmemory.size $m{n} drop\n", rng.next() as i32));
-                if f.contains(F::BulkMemory) {
+                if f.contains(F::BulkMemoryOpt) {
                     wat.push_str(&format!(
                         "{ty}.const 0 i32.const 0 {ty}.const 0 memory.fill $m{n}\n"
                     ));
+                }
+                if f.contains(F::MemoryControl) {
+                    wat.push_str(&format!("{ty}.const 0 {ty}.const 0 memory.discard $m{n}\n"));
                 }
                 if shared {
                     wat.push_str(&format!(

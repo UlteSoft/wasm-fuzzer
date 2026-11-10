@@ -8,3 +8,14 @@
 __pycache__/
 /core
 /core.[0-9]*
+
+# Corpus exports and release intermediates.
+/artifacts/
+/reports/
+/dist/
+/corpus/
+/corpus-*/
+*.wgp
+*.wgb
+*.out
+*.err

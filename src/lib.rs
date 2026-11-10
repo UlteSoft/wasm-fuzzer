@@ -1,9 +1,11 @@
 //! Type-driven generation of valid Core Wasm, with exact proposal gates.
 //! All public generation paths validate before returning bytes.
 pub mod config;
+mod encoding;
 pub mod features;
 pub mod generate;
 pub mod inspect;
+pub mod matrix;
 pub mod memtag;
 pub mod witnesses;
 

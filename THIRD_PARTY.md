@@ -10,6 +10,13 @@
   mutable globals. Upstream behavior remains the default. This project sets it
   to false because injected mutable exports break MVP validation and hidden
   globals violate section switches. No type-validation rule is relaxed.
+- Additional local controls separate function references from GC, bulk-memory-opt
+  from passive segments, and GC-managed heap types from function references.
+  Floats and all four embedding controls propagate into the generated feature
+  policy. Typed calls, reference operations and table initializers honor these
+  controls. Every result is checked by an unmodified upstream validator.
+- Release packaging and the WASIp1 std/libc rebuild procedure are adapted from
+  Apache-2.0 licensed wasm-git release tooling.
 
 ## wasmparser 0.249.0, memtag reader
 

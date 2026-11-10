@@ -1,0 +1,28 @@
+[package]
+name = "wasm-fuzzer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Reproducible, feature-exact valid WebAssembly Core and uwvm memtag generation"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+anyhow = "1"
+arbitrary = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+wasm-smith = { path = "vendor/wasm-smith" }
+wasm-encoder = "=0.249.0"
+wasmparser = "=0.249.0"
+wasmparser-memtag = { package = "wasmparser", path = "vendor/wasmparser-memtag" }
+wat = "=1.249.0"
+
+[profile.release]
+lto = "thin"
+
+[workspace]
+members = ["."]
+exclude = ["vendor/wasmparser-memtag", "vendor/wasm-smith"]

@@ -1,0 +1,7 @@
+wasm-fuzzer
+Copyright 2026 UlteSoft
+
+Includes wasm-smith and a locally extended wasmparser from the Bytecode Alliance
+wasm-tools project, and memtag reader changes from wasm-git.
+Original copyright and license notices are retained in vendor/.
+See THIRD_PARTY.md for sources, pinned versions, and local modifications.
